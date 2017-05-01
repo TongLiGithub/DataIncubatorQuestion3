@@ -1,0 +1,135 @@
+---
+title: "Data Incubator Question 3"
+author: "Tong Li"
+date: "May 1, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Load libraries
+```{r}
+library(ggplot2)
+library(psych)
+library(stats)
+library(FactoMineR)
+```
+
+## Read in file
+```{r}
+hr<-read.csv("HR-Employee-Attrition.csv")
+names(hr)
+sapply(hr[1,],class)
+colnames(hr)[1]<-"Age"
+names(hr)<-tolower(names(hr))
+anyDuplicated(hr$employeenumber) #no duplicated record
+
+hr$attrition<-as.character(hr$attrition)
+hr$attrition[hr$attrition=="Yes"]<-1
+hr$attrition[hr$attrition=="No"]<-0
+hr$attrition<-as.numeric(hr$attrition)
+```
+
+## See the distribution of each variable
+```{r}
+for (i in 1:length(hr)) {
+    x<-qplot(hr[,i], xlab=names(hr)[i])
+    print(x)
+}
+
+```
+
+## Select all continuous variables and try dimension reduction with PCA:
+```{r}
+conthr<-hr[,c(1,4,6,7,11,13:15,17,19:21,24:26,28:35)]
+sapply(conthr2[1,], class)
+hr.pca<-prcomp(conthr, center=TRUE, scale=TRUE)
+print(hr.pca)
+plot(hr.pca, type="l", col="blue")
+summary(hr.pca)
+eigenvalue<-(hr.pca$sdev)^2
+```
+Nine components have eigenvalues larger than 1. Scree plot shows three components before the bend. However, the cumulative proportion of variance explained by the first nine components is only 0.64, which means that these variables cannot be sufficiently explained by a few components. 
+
+##
+```{r}
+centerconthr<-conthr
+for (i in 1:length(conthr)) {
+    m<-scale(conthr[,i], center=TRUE, scale=TRUE)
+    centerconthr[,i]<-as.numeric(m)
+    
+}
+result<-PCA(centerconthr)
+
+```
+
+The variables factor map also shows that a few components cannot sufficiently summarize all (or most) variables.
+
+Therefore I will use the original continuous variables, together with the original categorical variables, to build a logistic regression model. I will use stepwise regression to select variables which make significant contribution in explaining the dependent variable (attrition).
+
+## Logistic regression
+```{r}
+#other (categorical) variables
+catehr<-hr[,c(2,3,5,8,10,12,16,18,23)]
+
+#all useful variables after transformed
+newhr<-cbind(catehr,centerconthr)
+newhr$attrition<-as.numeric(newhr$attrition)
+newhr$attrition<-as.character(hr$attrition)
+
+#stepwise logistic regression
+step(glm(attrition~., data=newhr, family=binomial(logit)))
+```
+
+## The selected model after stepwise regression
+```{r}
+model1<-glm(formula = attrition ~ businesstravel + educationfield + gender +     jobrole + maritalstatus + overtime + age + distancefromhome + 
+    environmentsatisfaction + jobinvolvement + jobsatisfaction + 
+    numcompaniesworked + relationshipsatisfaction + stockoptionlevel + 
+    totalworkingyears + trainingtimeslastyear + worklifebalance + 
+    yearsatcompany + yearsincurrentrole + yearssincelastpromotion + 
+    yearswithcurrmanager, family = binomial(logit), data = newhr)
+summary(model1)
+```
+
+I also want to control multicollinearity by checking the correlation between independent variables
+
+## Correlation between continuous IVs
+```{r}
+flattenSquareMatrix <- function(m) {
+    if( (class(m) != "matrix") | (nrow(m) != ncol(m))) stop("Must be a square matrix.") 
+    if(!identical(rownames(m), colnames(m))) stop("Row and column names must be equal.")
+    ut <- upper.tri(m)
+    data.frame(i = rownames(m)[row(m)[ut]],
+               j = rownames(m)[col(m)[ut]],
+               cor=t(m)[ut],
+               p=m[ut])
+}
+
+corr.test(centerconthr)
+
+examp <- corr.test(centerconthr) 
+mat.rp <- lower.tri(examp$r)*examp$r + t(lower.tri(examp$p)*examp$p) 
+mat.rp 
+# transform the matrix into a 4 column matrix with row/column indices, correlation, and p-value.
+flattenSquareMatrix(mat.rp)
+# store the results in Matrix
+Matrix <-flattenSquareMatrix(mat.rp)
+```
+
+Based on the correlaiton matrix and model 1 parameters, exclude education field, job role, years since last promotion, and years with current manager, and do the stepwise logistic regression again. 
+
+```{r}
+step(glm(attrition~.-educationfield-jobrole-yearswithcurrmanager-yearssincelastpromotion, data=newhr, family=binomial(logit)))
+
+```
+
+The selected model
+```{r}
+model2<-glm(formula = attrition ~ businesstravel + department + gender + maritalstatus + overtime + age + dailyrate + distancefromhome + environmentsatisfaction + jobinvolvement + joblevel + jobsatisfaction + numcompaniesworked +  relationshipsatisfaction + stockoptionlevel +     totalworkingyears + trainingtimeslastyear + worklifebalance + 
+yearsatcompany + yearsincurrentrole, family = binomial(logit), data = newhr)
+
+summary(model2)
+```
+
+Therefore from this model, we can see that employees who travel for work have more attritions than people who do not travel, emplyees working in research & development have more attritions than people in other departments, men report more attritions compared to women, single employees report more attritions compared to married and divorced employees. Younger age, less experience in work, overtime work, more distance from home, are related to more attritions, and higher level of environment satisfiaction, job involvement, joblevel, job satisfiaction, relationshipsatisfaction are correlated to low attritions. Surprisingly, people with better work-life balance seem to have more attritions. Maybe that means if you are workholics and don't care much about your personal life, you will have fewer attritions.
